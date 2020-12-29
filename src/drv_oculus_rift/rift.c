@@ -1281,6 +1281,16 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	// Find and attach Rift sensors if available
 	priv->tracker_ctx = rift_tracker_new (driver->ctx, priv->radio_address);
 
+	rift_tracked_device_imu_calibration imu_calibration;
+	int i;
+
+	imu_calibration.accel_offset = priv->imu_calibration.accel_offset;
+	imu_calibration.gyro_offset = priv->imu_calibration.gyro_offset;
+	for (i = 0; i < 9; i++) {
+		imu_calibration.accel_matrix[i] = priv->imu_calibration.accel_matrix[i/3][i%3];
+		imu_calibration.gyro_matrix[i] = priv->imu_calibration.gyro_matrix[i/3][i%3];
+	}
+
 	/* Configure the rift device in the tracker */
 	quatf imu_orient = {{ 0.0, 0.0, 0.0, 1.0 }};
 	posef imu_pose;
@@ -1292,15 +1302,6 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	posef model_pose;
 	oposef_init(&model_pose, &model_pos, &model_orient);
 
-	rift_tracked_device_imu_calibration imu_calibration;
-	int i;
-
-	imu_calibration.accel_offset = priv->imu_calibration.accel_offset;
-	imu_calibration.gyro_offset = priv->imu_calibration.gyro_offset;
-	for (i = 0; i < 9; i++) {
-		imu_calibration.accel_matrix[i] = priv->imu_calibration.accel_matrix[i/3][i%3];
-		imu_calibration.gyro_matrix[i] = priv->imu_calibration.gyro_matrix[i/3][i%3];
-	}
 	priv->tracked_dev = rift_tracker_add_device (priv->tracker_ctx, 0, &imu_pose, &model_pose, &priv->leds, &imu_calibration);
 
 	return priv;

@@ -198,6 +198,10 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose,
 	next_dev->model_from_fusion = next_dev->fusion_from_model;
 	oposef_inverse(&next_dev->model_from_fusion);
 
+	next_dev->base.leds = leds;
+	next_dev->base.led_search = led_search_model_new (leds);
+	ctx->n_devices++;
+
 	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name, "Rift Device");
 
 	const char *trace_file_dir = getenv("OHMD_TRACE_DIR");
@@ -209,7 +213,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose,
 		next_dev->debug_file = fopen(trace_file, "w");
 	}
 
-	if (next_dev->debug_file != NULL) {
+	if (next_dev->debug_file != NULL || next_dev->debug_metadata_gst != NULL) {
 		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
 		rift_tracked_device_send_debug_printf (next_dev, now, "{ \"type\": \"device\", "
 			 "\"device-id\": %d,"
@@ -226,10 +230,6 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose,
 			imu_calib->gyro_matrix[3], imu_calib->gyro_matrix[4], imu_calib->gyro_matrix[5],
 			imu_calib->gyro_matrix[6], imu_calib->gyro_matrix[7], imu_calib->gyro_matrix[8]);
 	}
-	next_dev->base.leds = leds;
-	next_dev->base.led_search = led_search_model_new (leds);
-	ctx->n_devices++;
-
 	ohmd_unlock_mutex (ctx->tracker_lock);
 
 	/* Tell the sensors about the new device */
@@ -472,8 +472,7 @@ rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *
 			rift_tracked_device_exposure_claim(dev, dev_info);
 		}
 
-		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
-		rift_tracked_device_send_debug_printf(dev, now, "{ \"type\": \"frame-start\", \"local-ts\": %llu, "
+		rift_tracked_device_send_debug_printf(dev, local_ts, "{ \"type\": \"frame-start\", \"local-ts\": %llu, "
 				"\"source\": \"%s\" }",
 				(unsigned long long) local_ts, source);
 		ohmd_unlock_mutex (dev->device_lock);
@@ -553,12 +552,14 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 		 * recently came online */
 		if (info && i < info->n_devices) {
 			rift_tracked_device_exposure_info *dev_info = info->devices + i;
+
+			fusion_slot = dev_info->fusion_slot;
 			rift_tracked_device_exposure_release_locked(dev, dev_info);
 
 			fusion_slot = dev_info->fusion_slot;
 		}
 
-		rift_tracked_device_send_debug_printf (dev, local_ts,
+		rift_tracked_device_send_debug_printf(dev, local_ts,
 			"{ \"type\": \"frame-release\", \"local-ts\": %llu, "
 			"\"frame-local-ts\": %llu, \"source\": \"%s\", \"delay-slot\": %d }",
 			(unsigned long long) local_ts, (unsigned long long) frame_local_ts, source,
@@ -585,6 +586,7 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 		rift_tracked_device_priv *dev = tracker_ctx->devices + i;
 		if (dev->base.led_search)
 			led_search_model_free (dev->base.led_search);
+
 		if (dev->debug_metadata != NULL)
 			ohmd_pw_debug_stream_free (dev->debug_metadata);
 		if (dev->debug_metadata_gst != NULL)
