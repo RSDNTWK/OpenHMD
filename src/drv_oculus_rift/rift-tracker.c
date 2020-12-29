@@ -193,6 +193,21 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	oposef_inverse(&next_dev->model_from_fusion);
 
 	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name, "Rift Device");
+
+	const char *trace_file_dir = getenv("OHMD_TRACE_DIR");
+	if (trace_file_dir) {
+		char trace_file[OHMD_STR_SIZE+1];
+		snprintf(trace_file, OHMD_STR_SIZE, "%s/%s", trace_file_dir, device_name);
+		trace_file[OHMD_STR_SIZE] = '\0';
+		LOGI("Opening trace file %s", trace_file);
+		next_dev->debug_file = fopen(trace_file, "w");
+	}
+
+	if (next_dev->debug_file != NULL) {
+		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
+		rift_tracked_device_send_debug_printf (next_dev, now, "{ \"type\": \"device\", "
+			 "\"device-id\": %d }", device_id);
+	}
 	next_dev->base.leds = leds;
 	next_dev->base.led_search = led_search_model_new (leds);
 	ctx->n_devices++;
@@ -378,7 +393,7 @@ void rift_tracker_on_new_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 			rift_tracked_device_send_imu_debug(dev);
 
 			rift_tracked_device_send_debug_printf(dev, now,
-					",\n{ \"type\": \"exposure\", \"local-ts\": %llu, "
+					"{ \"type\": \"exposure\", \"local-ts\": %llu, "
 					"\"hmd-ts\": %u, \"exposure-ts\": %u, \"count\": %u, \"device-ts\": %llu, "
 					"\"delay-slot\": %d	}",
 					(unsigned long long) now,
@@ -413,7 +428,6 @@ rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *
 		rift_tracked_device_priv *dev = ctx->devices + i;
 
 		ohmd_lock_mutex (dev->device_lock);
-		rift_tracked_device_send_imu_debug(dev);
 
 		/* This device might not have exposure info for this frame if it
 		 * recently came online */
@@ -422,11 +436,10 @@ rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *
 			rift_tracked_device_exposure_claim(dev, dev_info);
 		}
 
-		if (dev->debug_file != NULL) {
-			fprintf(dev->debug_file, ",\n{ \"type\": \"frame-start\", \"local-ts\": %llu, "
+		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
+		rift_tracked_device_send_debug_printf(dev, now, "{ \"type\": \"frame-start\", \"local-ts\": %llu, "
 				"\"source\": \"%s\" }",
 				(unsigned long long) local_ts, source);
-		}
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -465,24 +478,25 @@ rift_tracker_frame_captured (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t 
 	ohmd_lock_mutex (ctx->tracker_lock);
 	for (i = 0; i < ctx->n_devices; i++) {
 		rift_tracked_device_priv *dev = ctx->devices + i;
+		int fusion_slot = -1;
 
 		ohmd_lock_mutex (dev->device_lock);
 
 		if (i < info->n_devices) {
-#if LOGLEVEL == 0
 			rift_tracked_device_exposure_info *dev_info = info->devices + i;
+#if LOGLEVEL == 0
 			LOGD("Frame capture - ts %llu, delay slot %d for dev %d",
 				(unsigned long long) dev_info->device_time_ns, dev_info->fusion_slot, dev->base.id);
 #endif
+			fusion_slot = dev_info->fusion_slot;
 		}
 
-		rift_tracked_device_send_imu_debug(dev);
+		rift_tracked_device_send_debug_printf (dev, local_ts,
+			"{ \"type\": \"frame-captured\", \"local-ts\": %llu, "
+			"\"frame-start-local-ts\": %llu, \"source\": \"%s\", \"delay-slot\": %d }",
+			(unsigned long long) local_ts, (unsigned long long) frame_start_local_ts, source,
+			fusion_slot);
 
-		if (dev->debug_file != NULL) {
-			fprintf(dev->debug_file, ",\n{ \"type\": \"frame-captured\", \"local-ts\": %llu, "
-				"\"frame-start-local-ts\": %llu, \"source\": \"%s\" }",
-				(unsigned long long) local_ts, (unsigned long long) frame_start_local_ts, source);
-		}
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -495,6 +509,7 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 	ohmd_lock_mutex (ctx->tracker_lock);
 	for (i = 0; i < ctx->n_devices; i++) {
 		rift_tracked_device_priv *dev = ctx->devices + i;
+		int fusion_slot = -1;
 
 		ohmd_lock_mutex (dev->device_lock);
 
@@ -503,15 +518,15 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 		if (info && i < info->n_devices) {
 			rift_tracked_device_exposure_info *dev_info = info->devices + i;
 			rift_tracked_device_exposure_release_locked(dev, dev_info);
+
+			fusion_slot = dev_info->fusion_slot;
 		}
 
-		rift_tracked_device_send_imu_debug(dev);
-
-		if (dev->debug_file != NULL) {
-			fprintf(dev->debug_file, ",\n{ \"type\": \"frame-release\", \"local-ts\": %llu, "
-				"\"frame-local-ts\": %llu, \"source\": \"%s\" }",
-				(unsigned long long) local_ts, (unsigned long long) frame_local_ts, source);
-		}
+		rift_tracked_device_send_debug_printf (dev, local_ts,
+			"{ \"type\": \"frame-release\", \"local-ts\": %llu, "
+			"\"frame-local-ts\": %llu, \"source\": \"%s\", \"delay-slot\": %d }",
+			(unsigned long long) local_ts, (unsigned long long) frame_local_ts, source,
+			fusion_slot);
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -538,6 +553,10 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 			ohmd_pw_debug_stream_free (dev->debug_metadata);
 
 		rift_kalman_6dof_clear(&dev->ukf_fusion);
+
+		if (dev->debug_file != NULL) {
+			fclose(dev->debug_file);
+		}
 		ohmd_destroy_mutex (dev->device_lock);
 	}
 
@@ -788,14 +807,14 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 		}
 	}
 
-	rift_tracked_device_send_debug_printf(dev, local_ts, ",\n{ \"type\": \"pose\", \"local-ts\": %llu, "
+	rift_tracked_device_send_debug_printf(dev, local_ts, "{ \"type\": \"pose\", \"local-ts\": %llu, "
 			"\"device-ts\": %u, \"frame-start-local-ts\": %llu, "
 			"\"frame-local-ts\": %llu, \"frame-hmd-ts\": %u, "
 			"\"frame-exposure-count\": %u, \"frame-device-ts\": %llu, \"frame-fusion-slot\": %d, "
 			"\"source\": \"%s\", "
 			"\"pos\" : [ %f, %f, %f ], "
 			"\"orient\" : [ %f, %f, %f, %f ] }",
-			(unsigned long long) local_ts, dev->last_device_ts,
+			(unsigned long long) local_ts, dev->device_time_ns,
 			(unsigned long long) frame_start_local_ts,
 			(unsigned long long) exposure_info->local_ts, exposure_info->hmd_ts,
 			exposure_info->count,
@@ -860,7 +879,7 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 		for (i = 0; i < dev->num_pending_imu_observations; i++) {
 			rift_tracked_device_imu_observation *obs = dev->pending_imu_observations + i;
 
-			snprintf (debug_str, 1024, ",\n{ \"type\": \"imu\", \"local-ts\": %llu, "
+			snprintf (debug_str, 1024, "{ \"type\": \"imu\", \"local-ts\": %llu, "
 				 "\"device-ts\": %llu, \"dt\": %f, "
 				 "\"ang_vel\": [ %f, %f, %f ], \"accel\": [ %f, %f, %f ], "
 				 "\"mag\": [ %f, %f, %f ] }",
@@ -877,13 +896,32 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 		}
 	}
 
+	if (dev->debug_file != NULL) {
+		for (i = 0; i < dev->num_pending_imu_observations; i++) {
+			rift_tracked_device_imu_observation *obs = dev->pending_imu_observations + i;
+
+			fprintf (dev->debug_file, "{ \"type\": \"imu\", \"local-ts\": %llu, "
+				 "\"device-ts\": %llu, \"dt\": %f, "
+				 "\"ang_vel\": [ %f, %f, %f ], \"accel\": [ %f, %f, %f ], "
+				 "\"mag\": [ %f, %f, %f ] }",
+				(unsigned long long) obs->local_ts,
+				(unsigned long long) obs->device_ts, obs->dt,
+				obs->ang_vel.x, obs->ang_vel.y, obs->ang_vel.z,
+				obs->accel.x, obs->accel.y, obs->accel.z,
+				obs->mag.x, obs->mag.y, obs->mag.z);
+		}
+	}
+
 	dev->num_pending_imu_observations = 0;
 }
 
 static void
 rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t local_ts, const char *fmt, ...)
 {
-	if (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata)) {
+	bool to_pw = (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata));
+	bool to_file = (dev->debug_file != NULL);
+
+	if (to_pw || to_file) {
 		char debug_str[1024];
 		va_list args;
 
@@ -897,7 +935,12 @@ rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t lo
 
 		debug_str[1023] = '\0';
 
-		ohmd_pw_debug_stream_push (dev->debug_metadata, local_ts, debug_str);
+		if (to_pw)
+			ohmd_pw_debug_stream_push (dev->debug_metadata, local_ts, debug_str);
+		if (to_file) {
+			fprintf(dev->debug_file, "%s\n", debug_str);
+			fflush(dev->debug_file);
+		}
 	}
 }
 

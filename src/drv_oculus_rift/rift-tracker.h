@@ -5,7 +5,6 @@
  */
 
 /* Oculus Rift driver - positional tracking interface */
-
 #include "rift.h"
 #include "rift-kalman-6dof.h"
 #include "rift-tracker-common.h"
