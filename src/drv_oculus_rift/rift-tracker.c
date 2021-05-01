@@ -27,6 +27,7 @@
 #include "rift-debug-draw.h"
 
 #include "ohmd-pipewire.h"
+#include "ohmd-gstreamer.h"
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 
@@ -121,6 +122,8 @@ struct rift_tracked_device_priv {
 
 	ohmd_pw_debug_stream *debug_metadata;
 	FILE *debug_file;
+
+	ohmd_gst_debug_stream *debug_metadata_gst;
 };
 
 struct rift_tracker_ctx_s
@@ -142,6 +145,8 @@ struct rift_tracker_ctx_s
 
 	rift_tracked_device_priv devices[RIFT_MAX_TRACKED_DEVICES];
 	uint8_t n_devices;
+
+	ohmd_gst_pipeline *debug_pipe;
 };
 
 static void rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev);
@@ -152,8 +157,8 @@ static void rift_tracked_device_exposure_claim(rift_tracked_device_priv *dev, ri
 static void rift_tracked_device_exposure_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 
 rift_tracked_device *
-rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, posef *model_pose, rift_leds *leds,
-      rift_tracked_device_imu_calibration *imu_calib)
+rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose,
+	posef *model_pose, rift_leds *leds, rift_tracked_device_imu_calibration *imu_calib)
 {
 	int i, s;
 	rift_tracked_device_priv *next_dev;
@@ -224,6 +229,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	next_dev->base.leds = leds;
 	next_dev->base.led_search = led_search_model_new (leds);
 	ctx->n_devices++;
+
 	ohmd_unlock_mutex (ctx->tracker_lock);
 
 	/* Tell the sensors about the new device */
@@ -271,10 +277,27 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 	rift_tracker_config_load(ohmd_ctx, &tracker_ctx->config);
 	rift_tracker_config_get_center_offset(&tracker_ctx->config, &room_center_offset);
 
+	{
+		uint64_t now = ohmd_monotonic_get(ohmd_ctx);
+		char fname[200];
+		time_t t = time(NULL);
+		struct tm *tmp;
+
+		tmp = localtime(&t);
+		if (tmp != NULL && strftime(fname, sizeof(fname), "%Y-%m-%d-%H_%M_%S", tmp) != 0) {
+			tracker_ctx->debug_pipe = ohmd_gst_pipeline_new (fname, now);
+		}
+		else {
+			LOGW("Could not get filename for GStreamer recording");
+		}
+	}
+
 	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
 		rift_tracked_device_priv *dev = tracker_ctx->devices + i;
 		dev->index = i;
 		dev->device_lock = ohmd_create_mutex(ohmd_ctx);
+		if (tracker_ctx->debug_pipe)
+			dev->debug_metadata_gst = ohmd_gst_debug_stream_new(tracker_ctx->debug_pipe);
 	}
 
 	ret = libusb_init(&tracker_ctx->usb_ctx);
@@ -314,7 +337,8 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 				fprintf (stderr, "Failed to read the Rift Sensor Serial number.\n");
 		}
 
-		sensor_ctx = rift_sensor_new (ohmd_ctx, tracker_ctx->n_sensors, (char *) serial, tracker_ctx->usb_ctx, usb_devh, tracker_ctx, radio_id);
+		sensor_ctx = rift_sensor_new (ohmd_ctx, tracker_ctx->n_sensors, (char *) serial, tracker_ctx->usb_ctx, usb_devh, tracker_ctx, radio_id,
+											tracker_ctx->debug_pipe);
 		if (sensor_ctx != NULL) {
 			posef camera_pose;
 
@@ -333,7 +357,6 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 		}
 	}
 	libusb_free_device_list(devs, 1);
-
 	printf ("Opened %u Rift Sensor cameras\n", tracker_ctx->n_sensors);
 
 	return tracker_ctx;
@@ -564,6 +587,8 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 			led_search_model_free (dev->base.led_search);
 		if (dev->debug_metadata != NULL)
 			ohmd_pw_debug_stream_free (dev->debug_metadata);
+		if (dev->debug_metadata_gst != NULL)
+			ohmd_gst_debug_stream_free (dev->debug_metadata_gst);
 
 		rift_kalman_6dof_clear(&dev->ukf_fusion);
 
@@ -579,6 +604,9 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 
 	if (tracker_ctx->usb_ctx)
 		libusb_exit (tracker_ctx->usb_ctx);
+
+	if (tracker_ctx->debug_pipe)
+		ohmd_gst_pipeline_free(tracker_ctx->debug_pipe);
 
 	ohmd_destroy_mutex (tracker_ctx->tracker_lock);
 	free (tracker_ctx);
@@ -886,7 +914,7 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 	if (dev->num_pending_imu_observations == 0)
 		return;
 
-	if (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata)) {
+	if ((dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata)) || dev->debug_metadata_gst) {
 		char debug_str[1024];
 
 		for (i = 0; i < dev->num_pending_imu_observations; i++) {
@@ -905,7 +933,11 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 
 			debug_str[1023] = '\0';
 
-			ohmd_pw_debug_stream_push (dev->debug_metadata, obs->local_ts, debug_str);
+			if (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata))
+				ohmd_pw_debug_stream_push (dev->debug_metadata, obs->local_ts, debug_str);
+
+			if (dev->debug_metadata_gst)
+				ohmd_gst_debug_stream_push (dev->debug_metadata_gst, obs->local_ts, debug_str);
 		}
 	}
 
@@ -933,8 +965,9 @@ rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t lo
 {
 	bool to_pw = (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata));
 	bool to_file = (dev->debug_file != NULL);
+	bool to_gst = (dev->debug_metadata_gst != NULL);
 
-	if (to_pw || to_file) {
+	if (to_pw || to_file || to_gst) {
 		char debug_str[1024];
 		va_list args;
 
@@ -954,6 +987,8 @@ rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t lo
 			fprintf(dev->debug_file, "%s\n", debug_str);
 			fflush(dev->debug_file);
 		}
+		if (to_gst)
+			ohmd_gst_debug_stream_push (dev->debug_metadata_gst, local_ts, debug_str);
 	}
 }
 
