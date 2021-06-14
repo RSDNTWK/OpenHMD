@@ -156,6 +156,53 @@ static void rift_tracked_device_on_new_exposure (rift_tracked_device_priv *dev, 
 static void rift_tracked_device_exposure_claim(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 static void rift_tracked_device_exposure_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 
+static char *
+make_led_debug_string(rift_leds *leds) {
+	const size_t MAX_STR  = (3 * 1024);
+	char *debug_str = malloc(MAX_STR);
+	char *cur = debug_str, *end = debug_str + MAX_STR;
+	size_t avail = end - cur;
+	int i;
+
+	int would_write = snprintf(cur, avail, "[ ");
+	if (would_write < 0)
+		goto fail;
+	cur += would_write;
+
+	for (i = 0; i < leds->num_points; i++) {
+		rift_led *led = leds->points + i;
+
+		avail = end - cur;
+		would_write = snprintf(cur, avail, "%s{ \"pos\": [ %f, %f, %f ], \"dir\": [ %f, %f, %f ] }",
+											i == 0 ? "" : ",",
+											led->pos.x, led->pos.y, led->pos.z,
+											led->dir.x, led->dir.y, led->dir.z);
+
+		if (would_write < 0)
+			goto fail;
+
+		cur += would_write;
+		if (cur >= end)
+			goto fail;
+	}
+
+	avail = end - cur;
+	would_write = snprintf(cur, avail, "]");
+	if (would_write < 0)
+		goto fail;
+
+	cur += would_write;
+	if (cur >= end)
+		goto fail;
+
+	debug_str[MAX_STR-1] = '\0';
+	return debug_str;
+
+fail:
+	sprintf(debug_str, "\"Error\"");
+	return debug_str;
+}
+
 rift_tracked_device *
 rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose,
 	posef *model_pose, rift_leds *leds, rift_tracked_device_imu_calibration *imu_calib)
@@ -215,12 +262,17 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose,
 
 	if (next_dev->debug_file != NULL || next_dev->debug_metadata_gst != NULL) {
 		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
+		char *leds_str = make_led_debug_string(leds);
+
 		rift_tracked_device_send_debug_printf (next_dev, now, "{ \"type\": \"device\", "
-			 "\"device-id\": %d,"
+			"\"device-id\": %d, "
 			"\"imu-calibration\": { \"accel-offset\": [ %f, %f, %f ], "
 			"\"accel-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ], "
-			"\"gyro_offset\": [ %f, %f, %f ], "
-			"\"gyro-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ] } },", device_id,
+			"\"gyro-offset\": [ %f, %f, %f ], "
+			"\"gyro-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ] }, "
+			"\"imu-position\": [ %f, %f, %f ], \"imu-orient\": [ %f, %f, %f, %f ],"
+			"\"leds\": %s "
+			"}", device_id,
 			imu_calib->accel_offset.x, imu_calib->accel_offset.y, imu_calib->accel_offset.z,
 			imu_calib->accel_matrix[0], imu_calib->accel_matrix[1], imu_calib->accel_matrix[2],
 			imu_calib->accel_matrix[3], imu_calib->accel_matrix[4], imu_calib->accel_matrix[5],
@@ -228,7 +280,12 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose,
 			imu_calib->gyro_offset.x, imu_calib->gyro_offset.y, imu_calib->gyro_offset.z,
 			imu_calib->gyro_matrix[0], imu_calib->gyro_matrix[1], imu_calib->gyro_matrix[2],
 			imu_calib->gyro_matrix[3], imu_calib->gyro_matrix[4], imu_calib->gyro_matrix[5],
-			imu_calib->gyro_matrix[6], imu_calib->gyro_matrix[7], imu_calib->gyro_matrix[8]);
+			imu_calib->gyro_matrix[6], imu_calib->gyro_matrix[7], imu_calib->gyro_matrix[8],
+			imu_pose->pos.x, imu_pose->pos.y, imu_pose->pos.z,
+			imu_pose->orient.x, imu_pose->orient.y, imu_pose->orient.z, imu_pose->orient.w,
+			leds_str
+		);
+		free(leds_str);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
 
@@ -970,7 +1027,8 @@ rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t lo
 	bool to_gst = (dev->debug_metadata_gst != NULL);
 
 	if (to_pw || to_file || to_gst) {
-		char debug_str[1024];
+#define MAX_STR 4096
+		char debug_str[MAX_STR];
 		va_list args;
 
 		/* Send any pending IMU debug first */
@@ -978,10 +1036,10 @@ rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t lo
 
 		/* Print output string and send */
 		va_start(args, fmt);
-		vsnprintf(debug_str, 1024, fmt, args);
+		vsnprintf(debug_str, MAX_STR, fmt, args);
 		va_end(args);
 
-		debug_str[1023] = '\0';
+		debug_str[MAX_STR-1] = '\0';
 
 		if (to_pw)
 			ohmd_pw_debug_stream_push (dev->debug_metadata, local_ts, debug_str);
