@@ -957,6 +957,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	if (debug_pipe) {
 		rift_sensor_camera_params *calib = &sensor_ctx->calib;
 		char debug_str[1024];
+		uint64_t now = ohmd_monotonic_get(sensor_ctx->ohmd_ctx);
 
 		sensor_ctx->debug_vid_raw_gst = ohmd_gst_video_stream_new (debug_pipe, stream_id, OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
 
@@ -971,7 +972,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 			calib->dist_coeffs[4]);
 		debug_str[1023] = '\0';
 
-		ohmd_gst_pipeline_push_metadata (debug_pipe, 0, debug_str);
+		ohmd_gst_pipeline_push_metadata (debug_pipe, now, debug_str);
 	}
 
 	/* Annotated debug video stream */

@@ -37,6 +37,7 @@ struct ohmd_gst_video_stream_s {
 	gint height;
 
 	uint64_t base_ts;
+	uint64_t last_ts;
 };
 
 struct ohmd_gst_debug_stream_s {
@@ -44,6 +45,7 @@ struct ohmd_gst_debug_stream_s {
 	GstElement *src_q;
 
 	uint64_t base_ts;
+	uint64_t last_ts;
 };
 
 static gboolean
@@ -267,6 +269,11 @@ void ohmd_gst_pipeline_push_metadata (ohmd_gst_pipeline *pipe, int64_t pts, cons
 	ohmd_gst_debug_stream_push (pipe->global_metadata, pts, debug_str);
 }
 
+void ohmd_gst_pipeline_advance_to (ohmd_gst_pipeline *pipe, int64_t pts)
+{
+	ohmd_gst_debug_stream_advance_to (pipe->global_metadata, pts);
+}
+
 ohmd_gst_video_stream *ohmd_gst_video_stream_new (ohmd_gst_pipeline *pipe, const char *stream_id, ohmd_pw_video_format format, uint16_t w, uint16_t h, uint16_t fps_n, uint16_t fps_d)
 {
 	ohmd_gst_video_stream *ret = NULL;
@@ -281,7 +288,7 @@ ohmd_gst_video_stream *ohmd_gst_video_stream_new (ohmd_gst_pipeline *pipe, const
 	ret->height = h;
 	ret->base_ts = pipe->base_ts;
 
-	input_bin = gst_parse_bin_from_description("queue name=src ! jpegenc", TRUE, &err);
+	input_bin = gst_parse_bin_from_description("queue ! jpegenc", TRUE, &err);
 	if (err != NULL) {
 		fprintf(stderr, "Failed to create GStreamer recording pipeline: %s\n", err->message);
 		g_clear_error(&err);
@@ -357,7 +364,11 @@ void ohmd_gst_video_stream_push (ohmd_gst_video_stream *v, int64_t pts, const ui
 
 	gst_video_frame_unmap(&frame);
 
-	GST_BUFFER_PTS(buf) = pts - v->base_ts;
+	if (pts > v->base_ts)
+		pts -= v->base_ts;
+	else
+		pts = 0;
+	v->last_ts = GST_BUFFER_PTS(buf) = pts;
 
 	if (gst_pad_chain(v->sinkpad, buf) != GST_FLOW_OK) {
 		LOGW("Failed to push buffer to GStreamer recording pipeline");
@@ -384,7 +395,7 @@ ohmd_gst_debug_stream *ohmd_gst_debug_stream_new (ohmd_gst_pipeline *pipe, const
 
 	ret->base_ts = pipe->base_ts;
 
-	input_bin = gst_parse_bin_from_description("queue", TRUE, &err);
+	input_bin = gst_parse_bin_from_description("queue max-size-time=10000000000 max-size-buffers=0 ", TRUE, &err);
 	if (err != NULL) {
 		fprintf(stderr, "Failed to create GStreamer recording pipeline: %s\n", err->message);
 		g_clear_error(&err);
@@ -430,10 +441,39 @@ void ohmd_gst_debug_stream_push (ohmd_gst_debug_stream *s, int64_t pts, const ch
 	gchar *buf_content = g_strdup(debug_str);
 
 	buf = gst_buffer_new_wrapped(buf_content, strlen(buf_content) + 1);
-	GST_BUFFER_PTS(buf) = pts - s->base_ts;
+	if (pts > s->base_ts)
+		pts -= s->base_ts;
+	else
+		pts = 0;
+	s->last_ts = GST_BUFFER_PTS(buf) = pts;
 
 	if (gst_pad_chain(s->sinkpad, buf) != GST_FLOW_OK) {
 		LOGW("Failed to push buffer to GStreamer recording pipeline");
+	}
+}
+
+void
+ohmd_gst_debug_stream_advance_to (ohmd_gst_debug_stream *s, int64_t pts)
+{
+	const uint64_t advance_threshold = 20 * GST_MSECOND;
+	uint64_t new_pts;
+
+	if (pts > s->base_ts)
+		new_pts = pts - s->base_ts;
+	else
+		new_pts = 0;
+
+	if (new_pts < advance_threshold)
+		return;
+
+	/* Advance to the indicated time minus the threshold */
+	new_pts -= advance_threshold;
+	if (new_pts - s->last_ts > 0) {
+		GstEvent *gap = gst_event_new_gap (new_pts, GST_CLOCK_TIME_NONE);
+
+		gst_pad_send_event(s->sinkpad, gap);
+
+		s->last_ts = new_pts;
 	}
 }
 
