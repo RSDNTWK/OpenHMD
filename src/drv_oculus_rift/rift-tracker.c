@@ -351,10 +351,18 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 
 	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
 		rift_tracked_device_priv *dev = tracker_ctx->devices + i;
+		char device_name[64];
+
+		snprintf(device_name,64,"tracked-device-%d", i);
+		device_name[63] = 0;
+
 		dev->index = i;
 		dev->device_lock = ohmd_create_mutex(ohmd_ctx);
+
+		/* The debug pipe needs to already be created when we start delivering data to the
+		 * GStreamer pipeline so create it now */
 		if (tracker_ctx->debug_pipe)
-			dev->debug_metadata_gst = ohmd_gst_debug_stream_new(tracker_ctx->debug_pipe);
+			dev->debug_metadata_gst = ohmd_gst_debug_stream_new(tracker_ctx->debug_pipe, device_name);
 	}
 
 	ret = libusb_init(&tracker_ctx->usb_ctx);
