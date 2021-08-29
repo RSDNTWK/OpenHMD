@@ -491,15 +491,24 @@ void rift_tracker_on_new_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 			ohmd_lock_mutex (dev->device_lock);
 			rift_tracked_device_on_new_exposure(dev, dev_info);
 
-			rift_tracked_device_send_imu_debug(dev);
-
 			rift_tracked_device_send_debug_printf(dev, now,
-					"{ \"type\": \"exposure\", \"local-ts\": %llu, "
-					"\"hmd-ts\": %u, \"exposure-ts\": %u, \"count\": %u, \"device-ts\": %llu, "
-					"\"delay-slot\": %d	}",
-					(unsigned long long) now,
-					hmd_ts, exposure_hmd_ts, exposure_count,
-					(unsigned long long) dev_info->device_time_ns, dev_info->fusion_slot);
+				"{ \"type\": \"exposure\", \"local-ts\": %llu, "
+				"\"hmd-ts\": %u, \"exposure-ts\": %u, \"count\": %u, \"device-ts\": %llu, "
+				"\"delay-slot\": %d, "
+				"\"capture-pos\" : [ %f, %f, %f ], "
+				"\"capture-orient\" : [ %f, %f, %f, %f ], "
+				"\"rot-std-dev\" : [ %f, %f, %f ], "
+				"\"pos-std-dev\" : [ %f, %f, %f ] "
+				"	}",
+				(unsigned long long) now,
+				hmd_ts, exposure_hmd_ts, exposure_count,
+				(unsigned long long) dev_info->device_time_ns, dev_info->fusion_slot,
+				dev_info->capture_pose.pos.x, dev_info->capture_pose.pos.y,
+				dev_info->capture_pose.pos.z, dev_info->capture_pose.orient.x,
+				dev_info->capture_pose.orient.y, dev_info->capture_pose.orient.z,
+				dev_info->capture_pose.orient.w,
+				dev_info->rot_error.x, dev_info->rot_error.y, dev_info->rot_error.z,
+				dev_info->pos_error.x, dev_info->pos_error.y, dev_info->pos_error.z);
 			ohmd_unlock_mutex (dev->device_lock);
 		}
 		/* Clear the info for non-existent devices */
@@ -925,23 +934,36 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 				slot->n_pose_reports++;
 			}
 		}
-	}
 
-	rift_tracked_device_send_debug_printf(dev, local_ts, "{ \"type\": \"pose\", \"local-ts\": %llu, "
+		rift_tracked_device_send_debug_printf(dev, local_ts, "{ \"type\": \"pose\", \"local-ts\": %llu, "
 			"\"device-ts\": %u, \"frame-start-local-ts\": %llu, "
 			"\"frame-local-ts\": %llu, \"frame-hmd-ts\": %u, "
 			"\"frame-exposure-count\": %u, \"frame-device-ts\": %llu, \"frame-fusion-slot\": %d, "
 			"\"source\": \"%s\", "
+			"\"score-flags\": %d, \"update-position\": %d, \"update-orient\": %d, "
 			"\"pos\" : [ %f, %f, %f ], "
-			"\"orient\" : [ %f, %f, %f, %f ] }",
+			"\"orient\" : [ %f, %f, %f, %f ], "
+			"\"capture-pos\" : [ %f, %f, %f ], "
+			"\"capture-orient\" : [ %f, %f, %f, %f ], "
+			"\"rot-std-dev\" : [ %f, %f, %f ], "
+			"\"pos-std-dev\" : [ %f, %f, %f ] "
+			"}",
 			(unsigned long long) local_ts, dev->device_time_ns,
 			(unsigned long long) frame_start_local_ts,
 			(unsigned long long) exposure_info->local_ts, exposure_info->hmd_ts,
 			exposure_info->count,
 			(unsigned long long) frame_device_time_ns, frame_fusion_slot,
-			source,
+			source, score->match_flags, update_position, update_orientation,
 			model_pose->pos.x, model_pose->pos.y, model_pose->pos.z,
-			model_pose->orient.x, model_pose->orient.y, model_pose->orient.z, model_pose->orient.w);
+			model_pose->orient.x, model_pose->orient.y, model_pose->orient.z, model_pose->orient.w,
+			dev_info->capture_pose.pos.x, dev_info->capture_pose.pos.y,
+			dev_info->capture_pose.pos.z, dev_info->capture_pose.orient.x,
+			dev_info->capture_pose.orient.y, dev_info->capture_pose.orient.z,
+			dev_info->capture_pose.orient.w,
+			dev_info->rot_error.x, dev_info->rot_error.y, dev_info->rot_error.z,
+			dev_info->pos_error.x, dev_info->pos_error.y, dev_info->pos_error.z
+		);
+	}
 	ohmd_unlock_mutex (dev->device_lock);
 
 	return update_position || update_orientation;
@@ -1046,13 +1068,13 @@ rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t lo
 	bool to_file = (dev->debug_file != NULL);
 	bool to_gst = (dev->debug_metadata_gst != NULL);
 
+	/* Send/clear any pending IMU debug first */
+	rift_tracked_device_send_imu_debug(dev);
+
 	if (to_pw || to_file || to_gst) {
 #define MAX_STR 4096
 		char debug_str[MAX_STR];
 		va_list args;
-
-		/* Send any pending IMU debug first */
-		rift_tracked_device_send_imu_debug(dev);
 
 		/* Print output string and send */
 		va_start(args, fmt);
