@@ -1017,7 +1017,11 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 	if (dev->num_pending_imu_observations == 0)
 		return;
 
-	if ((dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata)) || dev->debug_metadata_gst) {
+	bool to_pw = (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata));
+	bool to_file = (dev->debug_file != NULL);
+	bool to_gst = (dev->debug_metadata_gst != NULL);
+
+	if (to_pw || to_file || to_gst) {
 		char debug_str[1024];
 
 		for (i = 0; i < dev->num_pending_imu_observations; i++) {
@@ -1041,22 +1045,9 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 
 			if (dev->debug_metadata_gst)
 				ohmd_gst_debug_stream_push (dev->debug_metadata_gst, obs->local_ts, debug_str);
-		}
-	}
 
-	if (dev->debug_file != NULL) {
-		for (i = 0; i < dev->num_pending_imu_observations; i++) {
-			rift_tracked_device_imu_observation *obs = dev->pending_imu_observations + i;
-
-			fprintf (dev->debug_file, "{ \"type\": \"imu\", \"local-ts\": %llu, "
-				 "\"device-ts\": %llu, \"dt\": %f, "
-				 "\"ang_vel\": [ %f, %f, %f ], \"accel\": [ %f, %f, %f ], "
-				 "\"mag\": [ %f, %f, %f ] }",
-				(unsigned long long) obs->local_ts,
-				(unsigned long long) obs->device_ts, obs->dt,
-				obs->ang_vel.x, obs->ang_vel.y, obs->ang_vel.z,
-				obs->accel.x, obs->accel.y, obs->accel.z,
-				obs->mag.x, obs->mag.y, obs->mag.z);
+			if (dev->debug_file != NULL)
+				fprintf (dev->debug_file, "%s\n", debug_str);
 		}
 	}
 
