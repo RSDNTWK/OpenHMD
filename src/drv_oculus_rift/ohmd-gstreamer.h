@@ -33,6 +33,7 @@ void ohmd_gst_debug_stream_free (ohmd_gst_debug_stream *s);
 #define ohmd_gst_pipeline_new(s,b) NULL
 #define ohmd_gst_pipeline_free(p)
 #define ohmd_gst_pipeline_advance_to(p, pts)
+#define ohmd_gst_pipeline_push_metadata(pipe,pts,debug_str)
 
 #define ohmd_gst_video_stream_new(p,s,f,w,h,fps_n,fps_d) NULL
 #define ohmd_gst_video_stream_push(v,pts,pixels)
