@@ -72,6 +72,8 @@ rift_sensor_ctx *rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *se
 void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 bool rift_sensor_add_device (rift_sensor_ctx *ctx, rift_tracked_device *device);
 void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_exposure_info *exposure_info);
+
 const char *rift_sensor_serial_no (rift_sensor_ctx *sensor);
+void rift_sensor_set_pose(rift_sensor_ctx *sensor, posef *camera_pose);
 
 #endif

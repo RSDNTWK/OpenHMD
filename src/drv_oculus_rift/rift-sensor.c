@@ -1189,3 +1189,16 @@ const char *rift_sensor_serial_no (rift_sensor_ctx *sensor)
 {
 	return sensor->serial_no;
 }
+
+void rift_sensor_set_pose(rift_sensor_ctx *sensor, posef *camera_pose)
+{
+	ohmd_lock_mutex (sensor->sensor_lock);
+	sensor->camera_pose = *camera_pose;
+	sensor->have_camera_pose = camera_pose;
+	ohmd_unlock_mutex (sensor->sensor_lock);
+
+	LOGI("Set sensor %d pose to orient %f %f %f %f  pos %f %f %f",
+	    sensor->id,
+	    camera_pose->orient.x, camera_pose->orient.y, camera_pose->orient.z, camera_pose->orient.w,
+	    camera_pose->pos.x, camera_pose->pos.y, camera_pose->pos.z);
+}
