@@ -8,7 +8,7 @@
 
 #include "rift.h"
 #include "rift-sensor-pose-helper.h"
-#include "rift-tracker.h"
+#include "rift-tracker-common.h"
 #include "rift-sensor-uvc.h"
 
 #ifndef __RIFT_SENSOR_H__
@@ -72,5 +72,6 @@ rift_sensor_ctx *rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *se
 void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 bool rift_sensor_add_device (rift_sensor_ctx *ctx, rift_tracked_device *device);
 void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_exposure_info *exposure_info);
+const char *rift_sensor_serial_no (rift_sensor_ctx *sensor);
 
 #endif

@@ -16,6 +16,7 @@
 #include <inttypes.h>
 
 #include "rift-sensor.h"
+#include "rift-tracker.h"
 
 #include "rift-sensor-blobwatch.h"
 #include "rift-sensor-ar0134.h"
@@ -742,6 +743,7 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 #endif
 
 			sensor_ctx->have_camera_pose = true;
+			rift_tracker_update_sensor_pose(sensor_ctx->tracker, sensor_ctx, &sensor_ctx->camera_pose);
 		}
 		else if (dev->id == 0) {
 			LOGD("Sensor %d No camera pose yet - gravity error is %f degrees rot_error (%f, %f, %f)",
@@ -1181,4 +1183,9 @@ void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_ex
 
 done:
 	ohmd_unlock_mutex (sensor->sensor_lock);
+}
+
+const char *rift_sensor_serial_no (rift_sensor_ctx *sensor)
+{
+	return sensor->serial_no;
 }
