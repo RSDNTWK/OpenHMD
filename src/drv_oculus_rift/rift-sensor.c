@@ -714,9 +714,12 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 			posef camera_object_pose = pose;
 			oposef_inverse(&camera_object_pose);
 
-			oposef_apply(&camera_object_pose, capture_pose, &sensor_ctx->camera_pose);
+			posef camera_pose;
+			oposef_apply(&camera_object_pose, capture_pose, &camera_pose);
+			rift_sensor_set_pose(sensor_ctx, &camera_pose);
+			rift_tracker_update_sensor_pose(sensor_ctx->tracker, sensor_ctx, &sensor_ctx->camera_pose);
 
-			LOGI("Set sensor %d pose from device %d - tracker pose quat %f %f %f %f  pos %f %f %f"
+			LOGD("Set sensor %d pose from device %d - tracker pose quat %f %f %f %f  pos %f %f %f"
 					" fusion pose quat %f %f %f %f  pos %f %f %f gravity error %f degrees yielded"
 					" world->camera pose quat %f %f %f %f  pos %f %f %f",
 				sensor_ctx->id, dev->id,
@@ -741,9 +744,6 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 				pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 #endif
-
-			sensor_ctx->have_camera_pose = true;
-			rift_tracker_update_sensor_pose(sensor_ctx->tracker, sensor_ctx, &sensor_ctx->camera_pose);
 		}
 		else if (dev->id == 0) {
 			LOGD("Sensor %d No camera pose yet - gravity error is %f degrees rot_error (%f, %f, %f)",
