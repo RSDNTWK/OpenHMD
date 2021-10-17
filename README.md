@@ -20,6 +20,23 @@ My current focus is on rearragnging the computer vision to:
 ### Oculus Rift S
 
 2020-06-01 - For Rift S, current development is focussed on reverse engineering the headset USB protocol and firmware details. There is a preliminary driver that supports 3DOF for the headset only, with no distortion in https://github.com/thaytan/OpenHMD/tree/dev-rift-s
+2021-01-19 - Positional tracking support is ongoing in this repo
+
+Development toward full positional tracking is happening here in the https://github.com/thaytan/OpenHMD/tree/rift-kalman-filter branch. This branch has the latest code for acquiring device positions from LED matching and tracking over time.
+
+My current focus is on improving the computer vision to:
+  * Improve device acquisition and matching using IMU orientation data, particularly for controllers
+  * Reduce jitter in tracking
+  * Improve tracking under difficult conditions - when device LEDs are heavily occluded or start to merge into one tracking blob at a distance or sharp angles to the camera.
+  * More testing of multiple camera setups.
+
+There are also various issues to resolve - spurious startup errors with USB transactions, and occasional watchdog timeouts that lead to a black screen.
+
+Joey made a demo video of current tracking status with a DK2 at https://www.youtube.com/watch?v=3AdmS3vy7ZE
+
+### Oculus Rift S
+
+2021-01-19 - For Rift S, upstream OpenHMD has a working 3DOF driver. I plan to work on positional support after CV1 tracking is in a functional state, unless someone else tackles it first.
 
 ## License
 OpenHMD is released under the permissive Boost Software License (see LICENSE for more information), to make sure it can be linked and distributed with both free and non-free software. While it doesn't require contribution from the users, it is still very appreciated.
