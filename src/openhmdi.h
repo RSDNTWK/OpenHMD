@@ -148,10 +148,6 @@ void ohmd_calc_default_proj_matrices(ohmd_device_properties* props);
 void ohmd_set_universal_distortion_k(ohmd_device_properties* props, float a, float b, float c, float d);
 void ohmd_set_universal_aberration_k(ohmd_device_properties* props, float r, float g, float b);
 
-const char *ohmd_get_config_dir(ohmd_context *ctx);
-int ohmd_set_config(ohmd_context *ctx, const char *key, char *buf, unsigned long buf_len);
-int ohmd_get_config(ohmd_context *ctx, const char *key, char **out_buf, unsigned long *out_len);
-
 // drivers
 ohmd_driver* ohmd_create_dummy_drv(ohmd_context* ctx);
 ohmd_driver* ohmd_create_oculus_rift_drv(ohmd_context* ctx);
