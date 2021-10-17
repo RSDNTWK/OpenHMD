@@ -57,7 +57,13 @@ option(OPENHMD_EXAMPLE_SIMPLE "Simple test binary" ON)
 option(OPENHMD_EXAMPLE_SDL "SDL OpenGL test (outdated)" OFF)
 
 if(OPENHMD_DRIVER_OCULUS_RIFT)
-  pkg_check_modules(libusb-1.0 REQUIRED libusb-1.0)
+# FIND_PACKAGE(LibUSB REQUIRED)
+set(LibUSB_FOUND ON)
+# part a
+set(LibUSB_INCLUDE_DIR "C:/compile/include/libusb-1.0")
+
+# part b
+set(LibUSB_LIBRARIES "-LC:/compile/lib;-lusb-1.0")
   find_package( OpenCV REQUIRED )
 
 	set(openhmd_source_files ${openhmd_source_files}
