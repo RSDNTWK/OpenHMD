@@ -75,6 +75,7 @@ else
 endif
 
 c_args = []
+
 debugging_mode = get_option('debugging_mode')
 have_pipewire = false
 if debugging_mode
